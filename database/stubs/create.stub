@@ -1,0 +1,56 @@
+package main
+
+import (
+	"database/sql"
+	"gante/config"
+	_ "github.com/go-sql-driver/mysql"
+	"log"
+	"os"
+	"strings"
+)
+
+type DummyStruct struct {
+	upStr   string
+	downStr string
+	db      *sql.DB
+}
+
+var DummyDB DummyStruct
+
+func init() {
+	DummyDB.db = config.Conf()
+}
+
+func main() {
+	command := os.Args[1]
+
+	if strings.Compare(command, "up") == 0 {
+		DummyDB.up()
+	} else {
+		DummyDB.down()
+	}
+}
+
+// Create a table
+func (DummyStruct) up() {
+	DummyDB.upStr = "CREATE TABLE DummyTable (" +
+		"id int(10) UNSIGNED NOT NULL, " +
+		// TODO: SQL here...
+		"created_at timestamp NULL DEFAULT NULL, " +
+		"updated_at timestamp NULL DEFAULT NULL" +
+		");"
+
+	_, err := DummyDB.db.Exec(DummyDB.upStr)
+	if err != nil {
+		log.Fatal(err)
+	}
+}
+
+// Drop a table
+func (DummyStruct) down() {
+	DummyDB.downStr = "DROP TABLE IF EXISTS `DummyTable`;"
+	_, err := DummyDB.db.Exec(DummyDB.downStr)
+	if err != nil {
+		log.Fatal(err)
+	}
+}
