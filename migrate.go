@@ -90,7 +90,7 @@ func copyFile(src, dst, tableName, structName string) {
 	// Replace Dummy string
 	out := bytes.Replace(in, []byte("DummyTable"), []byte(tableName), -1)
 	out = bytes.Replace(out, []byte("DummyStruct"), []byte(structName), -1)
-	out = bytes.Replace(out, []byte("DummyDB"), []byte(structName + "DB"), -1)
+	out = bytes.Replace(out, []byte("DummyDB"), []byte(structName+"DB"), -1)
 	if err = ioutil.WriteFile(dst, out, 0666); err != nil {
 		log.Fatal(err)
 		os.Exit(1)
@@ -126,6 +126,9 @@ func main() {
 		str := []string{path, timestamp, "_", inputName, ".go"}
 		fileName := strings.Join(str, "")
 
+		// Match table creation
+		// use create.stub template for table creation
+		// use blank.stub template for others
 		reg := regexp.MustCompile(`^create_(\w+)_table$`)
 
 		var (
@@ -172,20 +175,20 @@ func main() {
 		rows, err := db.Query(queryAllMigration)
 		checkErr(err)
 
-		var lastBatch int
+		var (
+			lastBatch int
+			dbMigrate []string
+			toMigrate []string
+		)
 		lastRow := db.QueryRow(queryLastMigration)
 		lastRow.Scan(&lastBatch)
 		batch = lastBatch + 1
 
 		defer rows.Close()
 
-		var dbMigrate []string
-		var toMigrate []string
-
 		if lastBatch == 0 {
 			// No migration record in database, all migrations should to be migrate
 			toMigrate = fSlices
-
 		} else {
 			// Get migrated files' name
 			for rows.Next() {
@@ -208,7 +211,7 @@ func main() {
 			symbol      string
 		)
 
-		// Nothing to migrate
+		// Nothing to migrate, stop and log fatal
 		toMigrateLen := len(toMigrate)
 		if toMigrateLen == 0 {
 			log.Fatal("Nothing migrated")
@@ -221,7 +224,7 @@ func main() {
 			checkErr(err)
 			log.Println("Migrated: " + v)
 
-			// Calculate the batch number, which is used to rollback
+			// Calculate the batch number, which is need to migrate
 			if i+1 == toMigrateLen {
 				symbol = ";"
 			} else {
@@ -236,6 +239,7 @@ func main() {
 
 		_, err = db.Exec(updateMigrationSql)
 		checkErr(err)
+
 	} else if strings.Compare(command, "rollback") == 0 {
 
 		// ********
@@ -270,6 +274,7 @@ func main() {
 		rows, err := db.Query("SELECT * FROM migrations WHERE `batch`>=" + strconv.Itoa(toBatch))
 		checkErr(err)
 
+		// Rollback slice
 		var rollBackMig []string
 		for rows.Next() {
 			m, err := scanRow(rows)
@@ -277,6 +282,7 @@ func main() {
 			rollBackMig = append(rollBackMig, m.Migration)
 		}
 
+		// Rolling back
 		for _, v := range rollBackMig {
 			cmd := exec.Command("sh", "-c", "go run ./database/migrations/"+v+".go down")
 			_, err = cmd.CombinedOutput()
