@@ -144,9 +144,9 @@ func main() {
 
 		if reg.MatchString(inputName) {
 			tableName = strArr[1]
-			template = "./database/stubs/create.stub"
+			template = "./config/stubs/create.stub"
 		} else {
-			template = "./database/stubs/blank.stub"
+			template = "./config/stubs/blank.stub"
 		}
 
 		copyFile(template, fileName, tableName, structName)
