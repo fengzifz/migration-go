@@ -156,6 +156,8 @@ func main() {
 		} else {
 			log.Fatal("Refresh nothing")
 		}
+	} else {
+		log.Fatalf("Command not support: %v", command)
 	}
 }
 
