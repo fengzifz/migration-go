@@ -3,10 +3,10 @@ package main
 import (
 	"bufio"
 	"database/sql"
+	"github.com/fatih/color"
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/joho/godotenv"
 	"io/ioutil"
-	"log"
 	"os"
 	"regexp"
 	"strconv"
@@ -60,9 +60,7 @@ func init() {
 
 func conf() {
 	err := godotenv.Load()
-	if err != nil {
-		log.Fatal(err)
-	}
+	checkErr(err)
 
 	// Database configuration
 	conn := os.Getenv("DB_CONNECTION")
@@ -74,7 +72,7 @@ func conf() {
 
 	db, err = sql.Open(conn, connInfo)
 	if err != nil {
-		log.Fatal(err)
+		checkErr(err)
 	}
 }
 
@@ -97,7 +95,8 @@ func createDir(path string) {
 // Check err and output
 func checkErr(err error) {
 	if err != nil {
-		log.Fatal(err)
+		color.Red("Error: %v", err)
+		os.Exit(1)
 	}
 }
 
@@ -112,7 +111,7 @@ func main() {
 		err := create(os.Args[2])
 		checkErr(err)
 
-		log.Println("Create a migration file successfully.")
+		color.Green("Create a migration file successfully")
 
 	} else if strings.Compare(command, "migrate") == 0 {
 
@@ -122,7 +121,7 @@ func main() {
 		err := migrate()
 		checkErr(err)
 
-		log.Println("Migrate completed")
+		color.Green("Migrate completed")
 
 	} else if strings.Compare(command, "rollback") == 0 {
 
@@ -140,7 +139,7 @@ func main() {
 		err := rollback(step)
 		checkErr(err)
 
-		log.Println("Rollback completed")
+		color.Green("Rollback completed")
 
 	} else if strings.Compare(command, "refresh") == 0 {
 
@@ -152,12 +151,12 @@ func main() {
 		checkErr(err)
 
 		if ok {
-			log.Println("Refresh completed")
+			color.Green("Refresh completed")
 		} else {
-			log.Fatal("Refresh nothing")
+			color.Blue("Refresh nothing")
 		}
 	} else {
-		log.Fatalf("Command not support: %v", command)
+		color.Red("Command not support: %v", command)
 	}
 }
 
@@ -167,7 +166,8 @@ func main() {
 func create(name string) error {
 
 	if len(name) < 0 {
-		log.Fatal("Please enter a migration file name")
+		color.Red("Please enter a migration file name")
+		os.Exit(2)
 	}
 
 	var (
@@ -298,7 +298,8 @@ func migrate() error {
 	// Nothing to migrate, stop and log fatal
 	toMigrateLen := len(toMigrate)
 	if toMigrateLen == 0 {
-		log.Fatal("Nothing migrated")
+		color.Blue("Nothing migrated")
+		os.Exit(2)
 	}
 
 	// Migrate
@@ -315,7 +316,7 @@ func migrate() error {
 			return err
 		}
 
-		log.Println("Migrated: " + v)
+		color.Green("Migrated: %v", v)
 
 		// Calculate the batch number, which is need to migrate
 		if i+1 == toMigrateLen {
@@ -358,7 +359,7 @@ func rollback(step string) error {
 		if lastBatch >= i {
 			toBatch = lastBatch - (i - 1)
 		} else {
-			log.Printf("Can not rollback %d steps", i)
+			color.Red("Can not rollback %d steps", i)
 			return err
 		}
 	}
@@ -392,7 +393,7 @@ func rollback(step string) error {
 			return err
 		}
 
-		log.Printf("Rollback: %s", v)
+		color.Green("Rollback: %s", v)
 	}
 
 	// Delete migrations record
@@ -407,13 +408,13 @@ func rollback(step string) error {
 // Refresh migration: rollback all and re-migrate
 func refresh() (bool, error) {
 	var (
-		insertStr string
-		symbol    string
-		fileByte  []byte
-		err       error
-		rows      *sql.Rows
+		insertStr   string
+		symbol      string
+		fileByte    []byte
+		err         error
+		rows        *sql.Rows
 		rollBackMig []string
-		m *Migration
+		m           *Migration
 	)
 
 	rows, err = db.Query("SELECT * FROM migrations;")
