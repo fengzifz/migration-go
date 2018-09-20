@@ -1,5 +1,7 @@
 # Migration Go
 
+[![Build Status](https://travis-ci.org/fengzifz/migration-go.svg?branch=master)](https://travis-ci.org/fengzifz/migration-go)
+
 A very simple migration tool like Laravel migration.
 
 Support commands:
