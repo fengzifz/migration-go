@@ -109,51 +109,8 @@ func main() {
 		// ***********************
 		// Create a migration file
 		// ***********************
-
-		inputName := os.Args[2]
-
-		if len(inputName) < 0 {
-			log.Fatal("Please enter a migration file name")
-		}
-
-		timestamp := time.Now().Format("20060102150405")
-		str := []string{migrationPath, timestamp, "_", inputName}
-		dirName := strings.Join(str, "")
-		createDir(dirName)
-
-		// Match table creation
-		// use create.stub template for table creation
-		// use blank.stub template for others
-		reg := regexp.MustCompile(`^create_(\w+)_table$`)
-
-		upFile, err := os.Create(dirName + "/up.sql")
+		err := create(os.Args[2])
 		checkErr(err)
-
-		downFile, err := os.Create(dirName + "/down.sql")
-		checkErr(err)
-
-		defer upFile.Close()
-		defer downFile.Close()
-
-		upWriter := bufio.NewWriter(upFile)
-		downWriter := bufio.NewWriter(downFile)
-
-		if reg.MatchString(inputName) {
-			tableName := strings.Split(inputName, "_")[1]
-			_, err = upWriter.WriteString(strings.Replace(createTableSql, "DummyTable", tableName, -1))
-			checkErr(err)
-			upWriter.Flush()
-
-			_, err = downWriter.WriteString(strings.Replace(dropTableSql, "DummyTable", tableName, -1))
-			checkErr(err)
-			downWriter.Flush()
-		} else {
-			_, err = upWriter.WriteString("")
-			checkErr(err)
-
-			_, err = downWriter.WriteString("")
-			checkErr(err)
-		}
 
 		log.Println("Create a migration file successfully.")
 
@@ -162,108 +119,17 @@ func main() {
 		// ****************
 		// Migrate database
 		// ****************
-
-		var (
-			fSlices []string
-			arr     []string
-			batch   int
-		)
-
-		// List migrations files
-		files, err := ioutil.ReadDir(migrationPath)
-		checkErr(err)
-		for _, f := range files {
-			arr = strings.Split(f.Name(), ".")
-			fSlices = append(fSlices, arr[0])
-		}
-
-		// Check migration version in database
-		rows, err := db.Query(queryAllMigrationSql)
+		err := migrate()
 		checkErr(err)
 
-		var (
-			lastBatch int
-			dbMigrate []string
-			toMigrate []string
-		)
-		lastRow := db.QueryRow(queryLastMigrationSql)
-		lastRow.Scan(&lastBatch)
-		batch = lastBatch + 1
-
-		defer rows.Close()
-
-		if lastBatch == 0 {
-			// No migration record in database, all migrations should to be migrate
-			toMigrate = fSlices
-		} else {
-			// Get migrated files' name
-			for rows.Next() {
-				m, err := scanRow(rows)
-				checkErr(err)
-				dbMigrate = append(dbMigrate, m.Migration)
-			}
-
-			// Compare and get which migration not migrated yet
-			for _, v := range fSlices {
-				if !sliceContain(dbMigrate, v) {
-					toMigrate = append(toMigrate, v)
-				}
-			}
-		}
-
-		var (
-			insertStr   string
-			symbol      string
-		)
-
-		// Nothing to migrate, stop and log fatal
-		toMigrateLen := len(toMigrate)
-		if toMigrateLen == 0 {
-			log.Fatal("Nothing migrated")
-		}
-
-		// Migrate
-		for i, v := range toMigrate {
-
-			// Read up.sql
-			upSql, err := ioutil.ReadFile(migrationPath + v + "/up.sql")
-			checkErr(err)
-
-			_, err = db.Exec(string(upSql))
-			checkErr(err)
-			log.Println("Migrated: " + v)
-
-			// Calculate the batch number, which is need to migrate
-			if i+1 == toMigrateLen {
-				symbol = ""
-			} else {
-				symbol = ","
-			}
-
-			insertStr += "('" + v + "', " + strconv.Itoa(batch) + ")" + symbol
-		}
-
-		// Connect sql update statement
-		updateMigrationSql = strings.Replace(updateMigrationSql, "DummyString", insertStr, -1)
-
-		_, err = db.Exec(updateMigrationSql)
-		checkErr(err)
+		log.Println("Migrate completed")
 
 	} else if strings.Compare(command, "rollback") == 0 {
 
 		// ********
 		// Rollback
 		// ********
-
-		var (
-			step      string
-			lastBatch int
-			toBatch   int
-		)
-
-		lastRow := db.QueryRow(queryLastMigrationSql)
-		lastRow.Scan(&lastBatch)
-
+		var step string
 		if len(os.Args) < 3 {
 			// Default step is 1
 			step = "1"
@@ -271,99 +137,343 @@ func main() {
 			step = os.Args[2]
 		}
 
-		if i, err := strconv.Atoi(step); err == nil {
-			if lastBatch >= i {
-				toBatch = lastBatch - (i - 1)
-			} else {
-				log.Fatalf("Can not rollback %d steps", i)
-			}
-		}
-
-		// Which migrations need to be rollback
-		rows, err := db.Query("SELECT * FROM migrations WHERE `batch`>=" + strconv.Itoa(toBatch))
+		err := rollback(step)
 		checkErr(err)
 
-		// Rollback slice
-		var rollBackMig []string
-		for rows.Next() {
-			m, err := scanRow(rows)
-			checkErr(err)
-			rollBackMig = append(rollBackMig, m.Migration)
-		}
+		log.Println("Rollback completed")
 
-		// Rolling back
-		for _, v := range rollBackMig {
-
-			downSql, err := ioutil.ReadFile(migrationPath + v + "/down.sql")
-			checkErr(err)
-
-			_, err = db.Exec(string(downSql))
-			checkErr(err)
-
-			log.Printf("Rollback: %s", v)
-		}
-
-		// Delete migrations record
-		_, err = db.Exec("DELETE FROM migrations WHERE `batch`>=" + strconv.Itoa(toBatch))
-		checkErr(err)
 	} else if strings.Compare(command, "refresh") == 0 {
 
 		// **********************************
 		// Refresh - rollback and re-migrate
 		// **********************************
-		var (
-			insertStr string
-			symbol    string
-			fileByte  []byte
-			err       error
-			rows      *sql.Rows
-		)
 
-		rows, err = db.Query("SELECT * FROM migrations;")
+		ok, err := refresh()
 		checkErr(err)
-		var rollBackMig []string
-		for rows.Next() {
-			m, err := scanRow(rows)
-			checkErr(err)
-			rollBackMig = append(rollBackMig, m.Migration)
-		}
 
-		// rollback and re-migrate
-		fileLen := len(rollBackMig)
-		if fileLen > 0 {
-			for i, v := range rollBackMig {
-				// down
-				fileByte, err = ioutil.ReadFile(migrationPath + v + "/down.sql")
-				checkErr(err)
-
-				_, err = db.Exec(string(fileByte))
-				checkErr(err)
-
-				// up
-				fileByte, err = ioutil.ReadFile(migrationPath + v + "/up.sql")
-				checkErr(err)
-
-				_, err = db.Exec(string(fileByte))
-				checkErr(err)
-
-				if i == fileLen-1 {
-					symbol = ""
-				} else {
-					symbol = ","
-				}
-
-				insertStr += "('" + v + "', 1)" + symbol
-			}
-
-			// Update migrations table
-			_, _ = db.Exec("TRUNCATE migrations;")
-			_, err = db.Exec(strings.Replace(updateMigrationSql, "DummyString", insertStr, -1))
-			checkErr(err)
-
-			log.Println("Refresh successfully")
+		if ok {
+			log.Println("Refresh completed")
 		} else {
 			log.Fatal("Refresh nothing")
 		}
+	}
+}
+
+// Create a migration file in /database/migration/
+// It will create a directory named <timestamp>_name,
+// there are two sql files inside: up.sql and down.sql
+func create(name string) error {
+
+	if len(name) < 0 {
+		log.Fatal("Please enter a migration file name")
+	}
+
+	var (
+		err      error
+		upFile   *os.File
+		downFile *os.File
+	)
+
+	timestamp := time.Now().Format("20060102150405")
+	str := []string{migrationPath, timestamp, "_", name}
+	dirName := strings.Join(str, "")
+	createDir(dirName)
+
+	// Match table creation
+	// use create.stub template for table creation
+	// use blank.stub template for others
+	reg := regexp.MustCompile(`^create_(\w+)_table$`)
+
+	upFile, err = os.Create(dirName + "/up.sql")
+	if err != nil {
+		return err
+	}
+
+	downFile, err = os.Create(dirName + "/down.sql")
+	if err != nil {
+		return err
+	}
+
+	defer upFile.Close()
+	defer downFile.Close()
+
+	upWriter := bufio.NewWriter(upFile)
+	downWriter := bufio.NewWriter(downFile)
+
+	if reg.MatchString(name) {
+		tableName := strings.Split(name, "_")[1]
+		_, err = upWriter.WriteString(strings.Replace(createTableSql, "DummyTable", tableName, -1))
+		if err != nil {
+			return err
+		}
+
+		upWriter.Flush()
+
+		_, err = downWriter.WriteString(strings.Replace(dropTableSql, "DummyTable", tableName, -1))
+		if err != nil {
+			return err
+		}
+
+		downWriter.Flush()
+	} else {
+		_, err = upWriter.WriteString("")
+		if err != nil {
+			return err
+		}
+
+		_, err = downWriter.WriteString("")
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// Migration
+func migrate() error {
+	var (
+		fSlices   []string
+		arr       []string
+		batch     int
+		files     []os.FileInfo
+		err       error
+		rows      *sql.Rows
+		lastBatch int
+		dbMigrate []string
+		toMigrate []string
+		m         *Migration
+		insertStr string
+		symbol    string
+		upSql     []byte
+	)
+
+	// List migrations files
+	files, err = ioutil.ReadDir(migrationPath)
+	if err != nil {
+		return err
+	}
+
+	for _, f := range files {
+		arr = strings.Split(f.Name(), ".")
+		fSlices = append(fSlices, arr[0])
+	}
+
+	// Check migration version in database
+	rows, err = db.Query(queryAllMigrationSql)
+	if err != nil {
+		return err
+	}
+
+	lastRow := db.QueryRow(queryLastMigrationSql)
+	lastRow.Scan(&lastBatch)
+	batch = lastBatch + 1
+
+	defer rows.Close()
+
+	if lastBatch == 0 {
+		// No migration record in database, all migrations should to be migrate
+		toMigrate = fSlices
+	} else {
+		// Get migrated files' name
+		for rows.Next() {
+			m, err = scanRow(rows)
+			if err != nil {
+				return err
+			}
+
+			dbMigrate = append(dbMigrate, m.Migration)
+		}
+
+		// Compare and get which migration not migrated yet
+		for _, v := range fSlices {
+			if !sliceContain(dbMigrate, v) {
+				toMigrate = append(toMigrate, v)
+			}
+		}
+	}
+
+	// Nothing to migrate, stop and log fatal
+	toMigrateLen := len(toMigrate)
+	if toMigrateLen == 0 {
+		log.Fatal("Nothing migrated")
+	}
+
+	// Migrate
+	for i, v := range toMigrate {
+
+		// Read up.sql
+		upSql, err = ioutil.ReadFile(migrationPath + v + "/up.sql")
+		if err != nil {
+			return err
+		}
+
+		_, err = db.Exec(string(upSql))
+		if err != nil {
+			return err
+		}
+
+		log.Println("Migrated: " + v)
+
+		// Calculate the batch number, which is need to migrate
+		if i+1 == toMigrateLen {
+			symbol = ""
+		} else {
+			symbol = ","
+		}
+
+		insertStr += "('" + v + "', " + strconv.Itoa(batch) + ")" + symbol
+	}
+
+	// Connect sql update statement
+	updateMigrationSql = strings.Replace(updateMigrationSql, "DummyString", insertStr, -1)
+
+	_, err = db.Exec(updateMigrationSql)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// Rollback migration
+func rollback(step string) error {
+
+	var (
+		lastBatch   int
+		toBatch     int
+		err         error
+		rows        *sql.Rows
+		rollBackMig []string
+		m           *Migration
+		downSql     []byte
+	)
+
+	lastRow := db.QueryRow(queryLastMigrationSql)
+	lastRow.Scan(&lastBatch)
+
+	if i, err := strconv.Atoi(step); err == nil {
+		if lastBatch >= i {
+			toBatch = lastBatch - (i - 1)
+		} else {
+			log.Printf("Can not rollback %d steps", i)
+			return err
+		}
+	}
+
+	// Which migrations need to be rollback
+	rows, err = db.Query("SELECT * FROM migrations WHERE `batch`>=" + strconv.Itoa(toBatch))
+	if err != nil {
+		return err
+	}
+
+	// Rollback slice
+	for rows.Next() {
+		m, err = scanRow(rows)
+		if err != nil {
+			return err
+		}
+
+		rollBackMig = append(rollBackMig, m.Migration)
+	}
+
+	// Rolling back
+	for _, v := range rollBackMig {
+
+		downSql, err = ioutil.ReadFile(migrationPath + v + "/down.sql")
+		if err != nil {
+			return err
+		}
+
+		_, err = db.Exec(string(downSql))
+		if err != nil {
+			return err
+		}
+
+		log.Printf("Rollback: %s", v)
+	}
+
+	// Delete migrations record
+	_, err = db.Exec("DELETE FROM migrations WHERE `batch`>=" + strconv.Itoa(toBatch))
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// Refresh migration: rollback all and re-migrate
+func refresh() (bool, error) {
+	var (
+		insertStr string
+		symbol    string
+		fileByte  []byte
+		err       error
+		rows      *sql.Rows
+		rollBackMig []string
+		m *Migration
+	)
+
+	rows, err = db.Query("SELECT * FROM migrations;")
+	if err != nil {
+		return false, err
+	}
+
+	for rows.Next() {
+		m, err = scanRow(rows)
+		if err != nil {
+			return false, err
+		}
+
+		rollBackMig = append(rollBackMig, m.Migration)
+	}
+
+	// rollback and re-migrate
+	fileLen := len(rollBackMig)
+	if fileLen > 0 {
+		for i, v := range rollBackMig {
+			// down
+			fileByte, err = ioutil.ReadFile(migrationPath + v + "/down.sql")
+			if err != nil {
+				return false, err
+			}
+
+			_, err = db.Exec(string(fileByte))
+			if err != nil {
+				return false, err
+			}
+
+			// up
+			fileByte, err = ioutil.ReadFile(migrationPath + v + "/up.sql")
+			if err != nil {
+				return false, err
+			}
+
+			_, err = db.Exec(string(fileByte))
+			if err != nil {
+				return false, err
+			}
+
+			if i == fileLen-1 {
+				symbol = ""
+			} else {
+				symbol = ","
+			}
+
+			insertStr += "('" + v + "', 1)" + symbol
+		}
+
+		// Update migrations table
+		_, _ = db.Exec("TRUNCATE migrations;")
+		_, err = db.Exec(strings.Replace(updateMigrationSql, "DummyString", insertStr, -1))
+		if err != nil {
+			return false, err
+		}
+
+		return true, nil
+
+	} else {
+		return false, nil
 	}
 }
 
