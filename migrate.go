@@ -1,20 +1,17 @@
 package main
 
 import (
-	"bytes"
+	"bufio"
 	"database/sql"
-	"fmt"
-	"gante/config"
 	_ "github.com/go-sql-driver/mysql"
+	"github.com/joho/godotenv"
 	"io/ioutil"
 	"log"
 	"os"
-	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
-	"unicode"
 )
 
 // Support command:
@@ -29,13 +26,19 @@ var (
 		"migration varchar(191) COLLATE utf8mb4_unicode_ci NOT NULL," +
 		"batch int(11) NOT NULL " +
 		") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;"
-	queryAllMigration  = "SELECT * FROM migrations;"
-	queryLastMigration = "SELECT batch FROM migrations ORDER BY batch DESC;"
-	updateMigrationSql = "INSERT INTO migrations (migration, batch) VALUES DummyString;"
+	queryAllMigrationSql  = "SELECT * FROM migrations;"
+	queryLastMigrationSql = "SELECT batch FROM migrations ORDER BY batch DESC;"
+	updateMigrationSql    = "INSERT INTO migrations (migration, batch) VALUES DummyString;"
+	dropTableSql          = "DROP TABLE IF EXISTS `DummyTable`;"
+	createTableSql        = "CREATE TABLE DummyTable (\n" +
+		"id int(10) UNSIGNED NOT NULL, \n" +
+		"created_at timestamp NULL DEFAULT NULL, \n" +
+		"updated_at timestamp NULL DEFAULT NULL\n" +
+		");"
 )
 
 // Migration files save path
-var path = "./database/migrations/"
+var migrationPath = "./database/migrations/"
 
 type rowScanner interface {
 	Scan(dst ...interface{}) error
@@ -50,22 +53,41 @@ type Migration struct {
 var db *sql.DB
 
 func init() {
-	createMigrationDir()
+	conf()
+	createDir(migrationPath)
 	InitMigration()
+}
+
+func conf() {
+	err := godotenv.Load()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Database configuration
+	conn := os.Getenv("DB_CONNECTION")
+	dbName := os.Getenv("DB_DATABASE")
+	username := os.Getenv("DB_USERNAME")
+	password := os.Getenv("DB_PASSWORD")
+	str := []string{username, ":", password, "@/", dbName}
+	connInfo := strings.Join(str, "")
+
+	db, err = sql.Open(conn, connInfo)
+	if err != nil {
+		log.Fatal(err)
+	}
 }
 
 // Connect to database
 // Read configurations' info in .env
 func InitMigration() {
-	db = config.Conf()
-
 	// Create migrations table if not exist
 	_, err := db.Exec(createMigrationSql)
 	checkErr(err)
 }
 
-// Create a migration dir
-func createMigrationDir() {
+// Create dir
+func createDir(path string) {
 	// Check ./database/migrations is exist, create it if not
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		os.Mkdir(path, 0755)
@@ -77,34 +99,6 @@ func checkErr(err error) {
 	if err != nil {
 		log.Fatal(err)
 	}
-}
-
-// Copy file from src to dst
-func copyFile(src, dst, tableName, structName string) {
-	in, err := ioutil.ReadFile(src)
-	if err != nil {
-		log.Fatal(err)
-		os.Exit(1)
-	}
-
-	// Replace Dummy string
-	out := bytes.Replace(in, []byte("DummyTable"), []byte(tableName), -1)
-	out = bytes.Replace(out, []byte("DummyStruct"), []byte(structName), -1)
-	out = bytes.Replace(out, []byte("DummyDB"), []byte(structName+"DB"), -1)
-	if err = ioutil.WriteFile(dst, out, 0666); err != nil {
-		log.Fatal(err)
-		os.Exit(1)
-	}
-
-	fmt.Println("Create a migration file successfully.")
-}
-
-// Upper the first letter
-func UpFirst(str string) string {
-	for i, v := range str {
-		return string(unicode.ToUpper(v)) + str[i+1:]
-	}
-	return ""
 }
 
 func main() {
@@ -119,37 +113,49 @@ func main() {
 		inputName := os.Args[2]
 
 		if len(inputName) < 0 {
-			log.Fatal("Please enter migration file name")
+			log.Fatal("Please enter a migration file name")
 		}
 
 		timestamp := time.Now().Format("20060102150405")
-		str := []string{path, timestamp, "_", inputName, ".go"}
-		fileName := strings.Join(str, "")
+		str := []string{migrationPath, timestamp, "_", inputName}
+		dirName := strings.Join(str, "")
+		createDir(dirName)
 
 		// Match table creation
 		// use create.stub template for table creation
 		// use blank.stub template for others
 		reg := regexp.MustCompile(`^create_(\w+)_table$`)
 
-		var (
-			tableName  string
-			structName string
-			template   string
-		)
+		upFile, err := os.Create(dirName + "/up.sql")
+		checkErr(err)
 
-		strArr := strings.Split(inputName, "_")
-		for _, v := range strArr {
-			structName += UpFirst(v)
-		}
+		downFile, err := os.Create(dirName + "/down.sql")
+		checkErr(err)
+
+		defer upFile.Close()
+		defer downFile.Close()
+
+		upWriter := bufio.NewWriter(upFile)
+		downWriter := bufio.NewWriter(downFile)
 
 		if reg.MatchString(inputName) {
-			tableName = strArr[1]
-			template = "./config/stubs/create.stub"
+			tableName := strings.Split(inputName, "_")[1]
+			_, err = upWriter.WriteString(strings.Replace(createTableSql, "DummyTable", tableName, -1))
+			checkErr(err)
+			upWriter.Flush()
+
+			_, err = downWriter.WriteString(strings.Replace(dropTableSql, "DummyTable", tableName, -1))
+			checkErr(err)
+			downWriter.Flush()
 		} else {
-			template = "./config/stubs/blank.stub"
+			_, err = upWriter.WriteString("")
+			checkErr(err)
+
+			_, err = downWriter.WriteString("")
+			checkErr(err)
 		}
 
-		copyFile(template, fileName, tableName, structName)
+		log.Println("Create a migration file successfully.")
 
 	} else if strings.Compare(command, "migrate") == 0 {
 
@@ -164,7 +170,7 @@ func main() {
 		)
 
 		// List migrations files
-		files, err := ioutil.ReadDir(path)
+		files, err := ioutil.ReadDir(migrationPath)
 		checkErr(err)
 		for _, f := range files {
 			arr = strings.Split(f.Name(), ".")
@@ -172,7 +178,7 @@ func main() {
 		}
 
 		// Check migration version in database
-		rows, err := db.Query(queryAllMigration)
+		rows, err := db.Query(queryAllMigrationSql)
 		checkErr(err)
 
 		var (
@@ -180,7 +186,7 @@ func main() {
 			dbMigrate []string
 			toMigrate []string
 		)
-		lastRow := db.QueryRow(queryLastMigration)
+		lastRow := db.QueryRow(queryLastMigrationSql)
 		lastRow.Scan(&lastBatch)
 		batch = lastBatch + 1
 
@@ -206,7 +212,6 @@ func main() {
 		}
 
 		var (
-			insertSlice []string
 			insertStr   string
 			symbol      string
 		)
@@ -219,19 +224,23 @@ func main() {
 
 		// Migrate
 		for i, v := range toMigrate {
-			cmd := exec.Command("sh", "-c", "go run ./database/migrations/"+v+".go up")
-			_, err = cmd.CombinedOutput()
+
+			// Read up.sql
+			upSql, err := ioutil.ReadFile(migrationPath + v + "/up.sql")
+			checkErr(err)
+
+			_, err = db.Exec(string(upSql))
 			checkErr(err)
 			log.Println("Migrated: " + v)
 
 			// Calculate the batch number, which is need to migrate
 			if i+1 == toMigrateLen {
-				symbol = ";"
+				symbol = ""
 			} else {
 				symbol = ","
 			}
-			insertSlice = []string{"('", v, "',", strconv.Itoa(batch), ")", symbol}
-			insertStr += strings.Join(insertSlice, "")
+
+			insertStr += "('" + v + "', " + strconv.Itoa(batch) + ")" + symbol
 		}
 
 		// Connect sql update statement
@@ -252,7 +261,7 @@ func main() {
 			toBatch   int
 		)
 
-		lastRow := db.QueryRow(queryLastMigration)
+		lastRow := db.QueryRow(queryLastMigrationSql)
 		lastRow.Scan(&lastBatch)
 
 		if len(os.Args) < 3 {
@@ -284,8 +293,11 @@ func main() {
 
 		// Rolling back
 		for _, v := range rollBackMig {
-			cmd := exec.Command("sh", "-c", "go run ./database/migrations/"+v+".go down")
-			_, err = cmd.CombinedOutput()
+
+			downSql, err := ioutil.ReadFile(migrationPath + v + "/down.sql")
+			checkErr(err)
+
+			_, err = db.Exec(string(downSql))
 			checkErr(err)
 
 			log.Printf("Rollback: %s", v)
@@ -294,6 +306,64 @@ func main() {
 		// Delete migrations record
 		_, err = db.Exec("DELETE FROM migrations WHERE `batch`>=" + strconv.Itoa(toBatch))
 		checkErr(err)
+	} else if strings.Compare(command, "refresh") == 0 {
+
+		// **********************************
+		// Refresh - rollback and re-migrate
+		// **********************************
+		var (
+			insertStr string
+			symbol    string
+			fileByte  []byte
+			err       error
+			rows      *sql.Rows
+		)
+
+		rows, err = db.Query("SELECT * FROM migrations;")
+		checkErr(err)
+		var rollBackMig []string
+		for rows.Next() {
+			m, err := scanRow(rows)
+			checkErr(err)
+			rollBackMig = append(rollBackMig, m.Migration)
+		}
+
+		// rollback and re-migrate
+		fileLen := len(rollBackMig)
+		if fileLen > 0 {
+			for i, v := range rollBackMig {
+				// down
+				fileByte, err = ioutil.ReadFile(migrationPath + v + "/down.sql")
+				checkErr(err)
+
+				_, err = db.Exec(string(fileByte))
+				checkErr(err)
+
+				// up
+				fileByte, err = ioutil.ReadFile(migrationPath + v + "/up.sql")
+				checkErr(err)
+
+				_, err = db.Exec(string(fileByte))
+				checkErr(err)
+
+				if i == fileLen-1 {
+					symbol = ""
+				} else {
+					symbol = ","
+				}
+
+				insertStr += "('" + v + "', 1)" + symbol
+			}
+
+			// Update migrations table
+			_, _ = db.Exec("TRUNCATE migrations;")
+			_, err = db.Exec(strings.Replace(updateMigrationSql, "DummyString", insertStr, -1))
+			checkErr(err)
+
+			log.Println("Refresh successfully")
+		} else {
+			log.Fatal("Refresh nothing")
+		}
 	}
 }
 
