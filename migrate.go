@@ -15,10 +15,10 @@ import (
 )
 
 // Support command:
-//  - make: create a migration file, "go migrate make create_user_table"
-//  - migrate: migrate the database to the latest version, "go migrate migrate"
-//  - rollback <step?>: rollback the database to an old version, "go migrate rollback", default rollback 1 version
-// 			    or "go migrate rollback 2", it means rollback 2 versions
+//  - make: Create a migration file, "go Migrate make create_user_table"
+//  - Migrate: Migrate the database to the latest version, "go Migrate Migrate"
+//  - Rollback <step?>: Rollback the database to an old version, "go Migrate Rollback", default Rollback 1 version
+// 			    or "go Migrate Rollback 2", it means Rollback 2 versions
 
 var (
 	createMigrationSql = "CREATE TABLE IF NOT EXISTS migrations (" +
@@ -86,7 +86,7 @@ func InitMigration() {
 
 // Create dir
 func createDir(path string) {
-	// Check ./database/migrations is exist, create it if not
+	// Check ./database/migrations is exist, Create it if not
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		os.Mkdir(path, 0755)
 	}
@@ -108,22 +108,30 @@ func main() {
 		// ***********************
 		// Create a migration file
 		// ***********************
-		err := create(os.Args[2])
+
+		fileName := os.Args[2]
+
+		if len(fileName) < 0 {
+			color.Red("Please enter a migration file name")
+			os.Exit(2)
+		}
+
+		_, err := Create(fileName)
 		checkErr(err)
 
-		color.Green("Create a migration file successfully")
+		color.Green("Create completed")
 
-	} else if strings.Compare(command, "migrate") == 0 {
+	} else if strings.Compare(command, "Migrate") == 0 {
 
 		// ****************
 		// Migrate database
 		// ****************
-		err := migrate()
+		err := Migrate()
 		checkErr(err)
 
 		color.Green("Migrate completed")
 
-	} else if strings.Compare(command, "rollback") == 0 {
+	} else if strings.Compare(command, "Rollback") == 0 {
 
 		// ********
 		// Rollback
@@ -136,18 +144,18 @@ func main() {
 			step = os.Args[2]
 		}
 
-		err := rollback(step)
+		err := Rollback(step)
 		checkErr(err)
 
 		color.Green("Rollback completed")
 
-	} else if strings.Compare(command, "refresh") == 0 {
+	} else if strings.Compare(command, "Refresh") == 0 {
 
 		// **********************************
-		// Refresh - rollback and re-migrate
+		// Refresh - Rollback and re-Migrate
 		// **********************************
 
-		ok, err := refresh()
+		ok, err := Refresh()
 		checkErr(err)
 
 		if ok {
@@ -161,14 +169,9 @@ func main() {
 }
 
 // Create a migration file in /database/migration/
-// It will create a directory named <timestamp>_name,
+// It will Create a directory named <timestamp>_name,
 // there are two sql files inside: up.sql and down.sql
-func create(name string) error {
-
-	if len(name) < 0 {
-		color.Red("Please enter a migration file name")
-		os.Exit(2)
-	}
+func Create(name string) (string, error) {
 
 	var (
 		err      error
@@ -182,18 +185,18 @@ func create(name string) error {
 	createDir(dirName)
 
 	// Match table creation
-	// use create.stub template for table creation
+	// use Create.stub template for table creation
 	// use blank.stub template for others
 	reg := regexp.MustCompile(`^create_(\w+)_table$`)
 
 	upFile, err = os.Create(dirName + "/up.sql")
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	downFile, err = os.Create(dirName + "/down.sql")
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	defer upFile.Close()
@@ -206,34 +209,35 @@ func create(name string) error {
 		tableName := strings.Split(name, "_")[1]
 		_, err = upWriter.WriteString(strings.Replace(createTableSql, "DummyTable", tableName, -1))
 		if err != nil {
-			return err
+			return "", err
 		}
 
 		upWriter.Flush()
 
 		_, err = downWriter.WriteString(strings.Replace(dropTableSql, "DummyTable", tableName, -1))
 		if err != nil {
-			return err
+			return "", err
 		}
 
 		downWriter.Flush()
 	} else {
 		_, err = upWriter.WriteString("")
 		if err != nil {
-			return err
+			return "", err
 		}
 
 		_, err = downWriter.WriteString("")
 		if err != nil {
-			return err
+			return "", err
 		}
 	}
 
-	return nil
+	color.Green("Created: %v", name)
+	return dirName, nil
 }
 
 // Migration
-func migrate() error {
+func Migrate() error {
 	var (
 		fSlices   []string
 		arr       []string
@@ -274,7 +278,7 @@ func migrate() error {
 	defer rows.Close()
 
 	if lastBatch == 0 {
-		// No migration record in database, all migrations should to be migrate
+		// No migration record in database, all migrations should to be Migrate
 		toMigrate = fSlices
 	} else {
 		// Get migrated files' name
@@ -295,7 +299,7 @@ func migrate() error {
 		}
 	}
 
-	// Nothing to migrate, stop and log fatal
+	// Nothing to Migrate, stop and log fatal
 	toMigrateLen := len(toMigrate)
 	if toMigrateLen == 0 {
 		color.Blue("Nothing migrated")
@@ -318,7 +322,7 @@ func migrate() error {
 
 		color.Green("Migrated: %v", v)
 
-		// Calculate the batch number, which is need to migrate
+		// Calculate the batch number, which is need to Migrate
 		if i+1 == toMigrateLen {
 			symbol = ""
 		} else {
@@ -340,7 +344,7 @@ func migrate() error {
 }
 
 // Rollback migration
-func rollback(step string) error {
+func Rollback(step string) error {
 
 	var (
 		lastBatch   int
@@ -359,12 +363,12 @@ func rollback(step string) error {
 		if lastBatch >= i {
 			toBatch = lastBatch - (i - 1)
 		} else {
-			color.Red("Can not rollback %d steps", i)
+			color.Red("Can not Rollback %d steps", i)
 			return err
 		}
 	}
 
-	// Which migrations need to be rollback
+	// Which migrations need to be Rollback
 	rows, err = db.Query("SELECT * FROM migrations WHERE `batch`>=" + strconv.Itoa(toBatch))
 	if err != nil {
 		return err
@@ -405,8 +409,8 @@ func rollback(step string) error {
 	return nil
 }
 
-// Refresh migration: rollback all and re-migrate
-func refresh() (bool, error) {
+// Refresh migration: Rollback all and re-Migrate
+func Refresh() (bool, error) {
 	var (
 		insertStr   string
 		symbol      string
@@ -431,7 +435,7 @@ func refresh() (bool, error) {
 		rollBackMig = append(rollBackMig, m.Migration)
 	}
 
-	// rollback and re-migrate
+	// Rollback and re-Migrate
 	fileLen := len(rollBackMig)
 	if fileLen > 0 {
 		for i, v := range rollBackMig {
