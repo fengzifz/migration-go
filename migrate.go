@@ -15,7 +15,7 @@ import (
 )
 
 // Support command:
-//  - make: Create a migration file, "go Migrate make create_user_table"
+//  - make: CreateMigration a migration file, "go Migrate make create_user_table"
 //  - Migrate: Migrate the database to the latest version, "go Migrate Migrate"
 //  - Rollback <step?>: Rollback the database to an old version, "go Migrate Rollback", default Rollback 1 version
 // 			    or "go Migrate Rollback 2", it means Rollback 2 versions
@@ -35,10 +35,15 @@ var (
 		"created_at timestamp NULL DEFAULT NULL, \n" +
 		"updated_at timestamp NULL DEFAULT NULL\n" +
 		");"
+	insertSql = "INSERT INTO `<TABLE_NAME>` \n" +
+		"() \n" +
+		"VALUES \n" +
+		"();"
 )
 
 // Migration files save path
 var migrationPath = "./database/migrations/"
+var seedPath = "./database/seeds/"
 
 type rowScanner interface {
 	Scan(dst ...interface{}) error
@@ -55,6 +60,7 @@ var db *sql.DB
 func init() {
 	conf()
 	createDir(migrationPath)
+	createDir(seedPath)
 	InitMigration()
 }
 
@@ -79,14 +85,14 @@ func conf() {
 // Connect to database
 // Read configurations' info in .env
 func InitMigration() {
-	// Create migrations table if not exist
+	// CreateMigration migrations table if not exist
 	_, err := db.Exec(createMigrationSql)
 	checkErr(err)
 }
 
-// Create dir
+// CreateMigration dir
 func createDir(path string) {
-	// Check ./database/migrations is exist, Create it if not
+	// Check ./database/migrations is exist, CreateMigration it if not
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		os.Mkdir(path, 0755)
 	}
@@ -103,10 +109,11 @@ func checkErr(err error) {
 func main() {
 	command := os.Args[1]
 
-	if strings.Compare(command, "make") == 0 {
+	if strings.Compare(command, "make:migration") == 0 {
 
 		// ***********************
-		// Create a migration file
+		// CreateMigration a migration file
+		// ./migrate make xxx
 		// ***********************
 
 		fileName := os.Args[2]
@@ -116,25 +123,27 @@ func main() {
 			os.Exit(2)
 		}
 
-		_, err := Create(fileName)
+		_, err := CreateMigration(fileName)
 		checkErr(err)
 
-		color.Green("Create completed")
+		color.Green("CreateMigration successfully!")
 
 	} else if strings.Compare(command, "Migrate") == 0 {
 
 		// ****************
 		// Migrate database
+		// ./migrate migrate
 		// ****************
 		err := Migrate()
 		checkErr(err)
 
-		color.Green("Migrate completed")
+		color.Green("Migrate successfully!")
 
 	} else if strings.Compare(command, "Rollback") == 0 {
 
 		// ********
 		// Rollback
+		// ./migrate rollback OR ./migrate rollback 3
 		// ********
 		var step string
 		if len(os.Args) < 3 {
@@ -147,31 +156,50 @@ func main() {
 		err := Rollback(step)
 		checkErr(err)
 
-		color.Green("Rollback completed")
+		color.Green("Rollback successfully!")
 
 	} else if strings.Compare(command, "Refresh") == 0 {
 
 		// **********************************
 		// Refresh - Rollback and re-Migrate
+		// ./migrate refresh
 		// **********************************
 
 		ok, err := Refresh()
 		checkErr(err)
 
 		if ok {
-			color.Green("Refresh completed")
+			color.Green("Refresh successfully!")
 		} else {
 			color.Blue("Refresh nothing")
 		}
+	} else if strings.Compare(command, "make:seeder") == 0 {
+
+		// **********************************
+		// Create seeder
+		// ./migrate make:seed <filename>
+		// **********************************
+
+		filename := os.Args[2]
+		if len(filename) < 0 {
+			color.Red("Please enter seeder name")
+			os.Exit(2)
+		}
+
+		_, err := CreateSeeder(filename)
+		checkErr(err)
+
+		color.Green("Create seeder successfully!")
 	} else {
 		color.Red("Command not support: %v", command)
 	}
 }
 
-// Create a migration file in /database/migration/
-// It will Create a directory named <timestamp>_name,
+// **** Command line tools ****
+// CreateMigration a migration file in /database/migration/
+// It will CreateMigration a directory named <timestamp>_name,
 // there are two sql files inside: up.sql and down.sql
-func Create(name string) (string, error) {
+func CreateMigration(name string) (string, error) {
 
 	var (
 		err      error
@@ -185,7 +213,7 @@ func Create(name string) (string, error) {
 	createDir(dirName)
 
 	// Match table creation
-	// use Create.stub template for table creation
+	// use CreateMigration.stub template for table creation
 	// use blank.stub template for others
 	reg := regexp.MustCompile(`^create_(\w+)_table$`)
 
@@ -206,7 +234,8 @@ func Create(name string) (string, error) {
 	downWriter := bufio.NewWriter(downFile)
 
 	if reg.MatchString(name) {
-		tableName := strings.Split(name, "_")[1]
+		r := strings.NewReplacer("create_", "", "_table", "")
+		tableName := r.Replace(name)
 		_, err = upWriter.WriteString(strings.Replace(createTableSql, "DummyTable", tableName, -1))
 		if err != nil {
 			return "", err
@@ -484,6 +513,44 @@ func Refresh() (bool, error) {
 	}
 }
 
+// Create seeder
+func CreateSeeder(name string) (string, error) {
+
+	// check duplicate filename
+	file, err := ioutil.ReadDir(seedPath)
+	if err != nil {
+		return "", err
+	}
+
+	for _, v := range file {
+		filename := strings.Split(v.Name(), ".")[0]
+		if strings.Compare(strings.ToLower(filename), strings.ToLower(name)) == 0 {
+			color.Red("%s already exist.", name)
+			os.Exit(2)
+		}
+	}
+
+	// Create a seed file
+	f, err := os.Create(seedPath + strings.ToLower(name) + ".sql")
+	if err != nil {
+		return "", err
+	}
+
+	defer f.Close()
+
+	w := bufio.NewWriter(f)
+
+	_, err = w.WriteString(insertSql)
+	if err != nil {
+		return "", err
+	}
+
+	w.Flush()
+
+	return name, nil
+}
+
+// **** other helpers ****
 // Check if slice contain a string
 func sliceContain(s []string, str string) bool {
 	for _, v := range s {
