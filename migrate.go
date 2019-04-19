@@ -126,7 +126,7 @@ func main() {
 		_, err := CreateMigration(fileName)
 		checkErr(err)
 
-		color.Green("CreateMigration successfully!")
+		color.Green("Create migration successfully!")
 
 	} else if strings.Compare(command, "up") == 0 {
 
@@ -190,6 +190,23 @@ func main() {
 		checkErr(err)
 
 		color.Green("Create seeder successfully!")
+	} else if strings.Compare(command, "db:seed") == 0 {
+
+		// **********************************
+		// Seed
+		// ./migrate db:seed <filename>
+		// **********************************
+
+		filename := os.Args[2]
+		if len(filename) < 0 {
+			color.Red("Please enter seeder name")
+			os.Exit(2)
+		}
+
+		err := InsertSeeder(filename)
+		checkErr(err)
+
+		color.Green("Update seed successfully!")
 	} else {
 		color.Red("Command not support: %v", command)
 	}
@@ -548,6 +565,23 @@ func CreateSeeder(name string) (string, error) {
 	w.Flush()
 
 	return name, nil
+}
+
+func InsertSeeder(name string) error {
+
+	seedSql, err := ioutil.ReadFile(seedPath + name + ".sql")
+	if err != nil {
+		return err
+	}
+
+	_, err = db.Exec(string(seedSql))
+	if err != nil {
+		return err
+	}
+
+	color.Green("db seed successfully!")
+
+	return nil
 }
 
 // **** other helpers ****

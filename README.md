@@ -10,6 +10,7 @@
 - **up**: 升级数据库
 - **down <step?>**: 回滚，默认回滚 1 步，`<step?>` 是可选参数，直接填数字
 - **refresh**: 重新运行所有的 migration
+- **db:seed**: 运行 seeder
 
 ## 支持的数据库：
 - MySQL
@@ -77,4 +78,9 @@ go run migrate.go refresh
 5. 创建 seeder
 ```
 go run migrate.go make:seeder user_seeder
+```
+
+6. 运行 seeder
+```
+go run migrate.go db:seed user_seeder
 ```
