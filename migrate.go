@@ -128,7 +128,7 @@ func main() {
 
 		color.Green("CreateMigration successfully!")
 
-	} else if strings.Compare(command, "Migrate") == 0 {
+	} else if strings.Compare(command, "up") == 0 {
 
 		// ****************
 		// Migrate database
@@ -139,7 +139,7 @@ func main() {
 
 		color.Green("Migrate successfully!")
 
-	} else if strings.Compare(command, "Rollback") == 0 {
+	} else if strings.Compare(command, "down") == 0 {
 
 		// ********
 		// Rollback
@@ -158,7 +158,7 @@ func main() {
 
 		color.Green("Rollback successfully!")
 
-	} else if strings.Compare(command, "Refresh") == 0 {
+	} else if strings.Compare(command, "refresh") == 0 {
 
 		// **********************************
 		// Refresh - Rollback and re-Migrate
@@ -177,7 +177,7 @@ func main() {
 
 		// **********************************
 		// Create seeder
-		// ./migrate make:seed <filename>
+		// ./migrate make:seeder <filename>
 		// **********************************
 
 		filename := os.Args[2]

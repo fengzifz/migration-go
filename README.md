@@ -7,8 +7,8 @@
 ## 目前支持的命令：
 - **make:migration**: 创建 migration
 - **make:seeder**: 创建 seeder
-- **migrate**: 升级数据库
-- **rollback <step?>**: 回滚，默认回滚 1 步，`<step?>` 是可选参数，直接填数字
+- **up**: 升级数据库
+- **down <step?>**: 回滚，默认回滚 1 步，`<step?>` 是可选参数，直接填数字
 - **refresh**: 重新运行所有的 migration
 
 ## 支持的数据库：
@@ -58,14 +58,14 @@ go run migrate.go make:migration create_user_table
 
 2. 升级 migration
 ```
-go run migrate.go migrate
+go run migrate.go up
 ```
 
 3. 回滚
 ```
-go run migrate.go rollback # 默认回滚 1 步
+go run migrate.go down # 默认回滚 1 步
 
-go run migrate.go rollback 2 # 回滚 2 步
+go run migrate.go down 2 # 回滚 2 步
 
 ```
 
