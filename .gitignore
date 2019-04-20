@@ -79,3 +79,5 @@ fabric.properties
 .env
 vendor/
 database/migrations
+Gopkg.lock
+Gopkg.toml
