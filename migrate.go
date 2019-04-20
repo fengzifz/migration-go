@@ -31,7 +31,7 @@ var (
 	updateMigrationSql    = "INSERT INTO migrations (migration, batch) VALUES DummyString;"
 	dropTableSql          = "DROP TABLE IF EXISTS `DummyTable`;"
 	createTableSql        = "CREATE TABLE DummyTable (\n" +
-		"id int(10) UNSIGNED NOT NULL, \n" +
+		"id int(10) UNSIGNED AUTO_INCREMENT NOT NULL PRIMARY KEY, \n" +
 		"created_at timestamp NULL DEFAULT NULL, \n" +
 		"updated_at timestamp NULL DEFAULT NULL\n" +
 		");"
@@ -203,7 +203,15 @@ func main() {
 			os.Exit(2)
 		}
 
-		err := InsertSeeder(filename)
+		var refresh bool
+		isRefresh := os.Args[3]
+		if strings.Compare(isRefresh, "refresh") == 0 {
+			refresh = true
+		} else {
+			refresh = false
+		}
+
+		err := InsertSeeder(filename, refresh)
 		checkErr(err)
 
 		color.Green("Update seed successfully!")
@@ -567,13 +575,21 @@ func CreateSeeder(name string) (string, error) {
 	return name, nil
 }
 
-func InsertSeeder(name string) error {
+// Insert seeder into database
+func InsertSeeder(name string, refresh bool) error {
 
 	seedSql, err := ioutil.ReadFile(seedPath + name + ".sql")
 	if err != nil {
 		return err
 	}
 
+	if refresh {
+		tableName := strings.Replace(name, "_seeder", "", -1)
+		_, err = db.Exec("TRUNCATE " + tableName)
+		if err != nil {
+			return err
+		}
+	}
 	_, err = db.Exec(string(seedSql))
 	if err != nil {
 		return err

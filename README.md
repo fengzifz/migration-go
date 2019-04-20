@@ -82,5 +82,10 @@ go run migrate.go make:seeder user_seeder
 
 6. 运行 seeder
 ```
-go run migrate.go db:seed user_seeder
+# 插入数据
+go run migrate.go db:seed user_seeder 
+
+# 清空表，重新插入数据
+go run migrate.go db:seed user_seeder refresh
 ```
+**注意**：要支持 refresh，那么创建 seeder 时，seeder 的名字需要遵守这个约束：<table_name>_seeder
