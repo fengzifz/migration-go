@@ -94,7 +94,7 @@ func InitMigration() {
 func createDir(path string) {
 	// Check ./database/migrations is exist, CreateMigration it if not
 	if _, err := os.Stat(path); os.IsNotExist(err) {
-		os.Mkdir(path, 0755)
+		_ = os.Mkdir(path, 0755)
 	}
 }
 
@@ -266,14 +266,14 @@ func CreateMigration(name string) (string, error) {
 			return "", err
 		}
 
-		upWriter.Flush()
+		_ = upWriter.Flush()
 
 		_, err = downWriter.WriteString(strings.Replace(dropTableSql, "DummyTable", tableName, -1))
 		if err != nil {
 			return "", err
 		}
 
-		downWriter.Flush()
+		_ = downWriter.Flush()
 	} else {
 		_, err = upWriter.WriteString("")
 		if err != nil {
@@ -326,7 +326,7 @@ func Migrate() error {
 	}
 
 	lastRow := db.QueryRow(queryLastMigrationSql)
-	lastRow.Scan(&lastBatch)
+	_ = lastRow.Scan(&lastBatch)
 	batch = lastBatch + 1
 
 	defer rows.Close()
@@ -411,7 +411,7 @@ func Rollback(step string) error {
 	)
 
 	lastRow := db.QueryRow(queryLastMigrationSql)
-	lastRow.Scan(&lastBatch)
+	_ = lastRow.Scan(&lastBatch)
 
 	if i, err := strconv.Atoi(step); err == nil {
 		if lastBatch >= i {
@@ -570,7 +570,7 @@ func CreateSeeder(name string) (string, error) {
 		return "", err
 	}
 
-	w.Flush()
+	_ = w.Flush()
 
 	return name, nil
 }
